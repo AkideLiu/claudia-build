@@ -54,9 +54,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
+          - platform: 'macos-latest' # Intel Macs
             target: 'x86_64-apple-darwin'
             args: '--target x86_64-apple-darwin'
+          - platform: 'macos-latest' # Apple Silicon Macs (M1/M2/M3)
+            target: 'aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin'
           - platform: 'ubuntu-20.04'
             target: 'x86_64-unknown-linux-gnu'
             args: ''
@@ -95,10 +98,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: Setup Rust target for Apple Silicon (macOS only)
-        if: matrix.platform == 'macos-latest'
-        run: rustup target add aarch64-apple-darwin
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -141,8 +140,9 @@ jobs:
             - Download the `.exe` installer for a portable installation
             
             ### macOS
-            - Download the `.dmg` file
-            - Built for Intel Macs (x86_64)
+            - Download the `.dmg` file matching your Mac:
+              - `*-x86_64.dmg` for Intel Macs
+              - `*-aarch64.dmg` for Apple Silicon Macs (M1/M2/M3)
             
             ### Linux
             - Download the `.deb` package for Debian/Ubuntu-based distributions

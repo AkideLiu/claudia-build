@@ -13,10 +13,10 @@ This directory contains automated workflows for building and releasing Claudia.
 - Manual workflow dispatch
 
 **What it does**:
-- Builds on Ubuntu 20.04 (Linux), macOS (universal binary for Intel + Apple Silicon), and Windows
+- Builds on Ubuntu 20.04 (Linux), macOS (separate builds for Intel and Apple Silicon), and Windows
 - Creates platform-specific installers:
   - Linux: `.deb` package and `.AppImage`
-  - macOS: `.dmg` installer (universal binary)
+  - macOS: `.dmg` installers for both Intel (`*-x86_64.dmg`) and Apple Silicon (`*-aarch64.dmg`)
   - Windows: `.msi` and `.exe` installers
 - Creates a GitHub release with all artifacts
 
