@@ -55,8 +55,8 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            target: 'universal-apple-darwin'
-            args: '--target universal-apple-darwin'
+            target: 'x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin'
           - platform: 'ubuntu-20.04'
             target: 'x86_64-unknown-linux-gnu'
             args: ''
@@ -95,6 +95,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Setup Rust target for Apple Silicon (macOS only)
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -138,7 +142,7 @@ jobs:
             
             ### macOS
             - Download the `.dmg` file
-            - The universal binary supports both Intel and Apple Silicon Macs
+            - Built for Intel Macs (x86_64)
             
             ### Linux
             - Download the `.deb` package for Debian/Ubuntu-based distributions
