@@ -1,0 +1,194 @@
+name: Daily Update and Build
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: write # Required for creating releases and pushing changes
+
+env:
+  CARGO_TERM_COLOR: always
+  UPSTREAM_REPO: getAsterisk/claudia # Change this to the upstream repository
+
+jobs:
+  sync-upstream:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git || true
+          git fetch upstream
+
+      - name: Sync with upstream
+        run: |
+          # Try to merge upstream changes
+          git checkout main || git checkout master
+          git merge upstream/main --no-edit || git merge upstream/master --no-edit || {
+            echo "Merge conflict detected. Manual intervention needed."
+            echo "merge_conflict=true" >> $GITHUB_ENV
+            exit 0
+          }
+          
+          # Push the changes if any
+          git push origin HEAD || echo "No changes to push"
+
+  build-and-release:
+    needs: sync-upstream
+    # Always build, regardless of upstream changes
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            target: 'universal-apple-darwin'
+            args: '--target universal-apple-darwin'
+          - platform: 'ubuntu-20.04'
+            target: 'x86_64-unknown-linux-gnu'
+            args: ''
+          - platform: 'windows-latest'
+            target: 'x86_64-pc-windows-msvc'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main # Ensure we're building the updated code
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-20.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libxdo-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: daily-${{ steps.date.outputs.date }}
+          releaseName: 'Claudia Daily Build - ${{ steps.date.outputs.date }}'
+          releaseBody: |
+            This is an automated daily build from the main branch.
+            
+            **Build Date**: ${{ steps.date.outputs.date }}
+            **Build Time**: ${{ github.event.repository.updated_at }}
+            **Commit**: ${{ github.sha }}
+            
+            ## ⚠️ Warning
+            This is a development build and may be unstable. Use at your own risk.
+            
+            ## Installation
+            
+            ### Windows
+            - Download the `.msi` installer for a system-wide installation
+            - Download the `.exe` installer for a portable installation
+            
+            ### macOS
+            - Download the `.dmg` file
+            - The universal binary supports both Intel and Apple Silicon Macs
+            
+            ### Linux
+            - Download the `.deb` package for Debian/Ubuntu-based distributions
+            - Download the `.AppImage` for a portable application that runs on most Linux distributions
+            
+            ## Recent Changes
+            View recent commits: https://github.com/${{ github.repository }}/commits/main
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }}
+
+  cleanup-old-daily-builds:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Cleanup old daily releases
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Keep only the 7 most recent daily builds (one week)
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const dailyReleases = releases.data
+              .filter(release => release.tag_name.startsWith('daily-'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            
+            // Delete old daily releases (keep the 7 most recent)
+            for (let i = 7; i < dailyReleases.length; i++) {
+              console.log(`Deleting old daily release: ${dailyReleases[i].tag_name}`);
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: dailyReleases[i].id
+              });
+              
+              // Also delete the tag
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `tags/${dailyReleases[i].tag_name}`
+                });
+              } catch (e) {
+                console.log(`Failed to delete tag ${dailyReleases[i].tag_name}: ${e.message}`);
+              }
+            }
+
